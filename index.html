@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Teste: Conectar com Facebook</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #1c1e21; background: #fff; }
+    button { background: #1877f2; color: #fff; border: 0; border-radius: 6px; padding: 12px 20px; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    pre { background: #f0f2f5; padding: 12px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Ative sua secretária no WhatsApp</h1>
+  <p>Página de teste (Trinity). Clique, crie sua conta na Meta e, se pedir número, use <strong>+55 11 95504-7135</strong>.</p>
+  <button id="conectar" disabled>Conectar com Facebook</button>
+  <h2>Andamento</h2>
+  <pre id="log">Carregando o SDK da Meta...</pre>
+
+  <script>
+    // Valores públicos do app de teste (não são segredos)
+    const APP_ID = '1108179435251528';
+    const ES_CONFIG_ID = '966041332735542';
+    const GRAPH_VERSION = 'v24.0';
+    // Receptor no computador de quem está testando: troca o código pelo token na hora
+    const RECEPTOR = 'http://localhost:8765/codigo';
+
+    const logEl = document.getElementById('log');
+    const botao = document.getElementById('conectar');
+    const log = (msg) => { logEl.textContent += '\n' + new Date().toLocaleTimeString() + '  ' + msg; };
+
+    let sessionInfo = null;
+    window.__es = { code: null, session: null };
+    window.addEventListener('message', (event) => {
+      if (!event.origin.endsWith('facebook.com')) return;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'WA_EMBEDDED_SIGNUP') {
+          sessionInfo = data;
+          window.__es.session = data;
+          log('Meta: ' + data.event + ' ' + JSON.stringify(data.data || {}));
+        }
+      } catch (_) { /* mensagens que não são JSON */ }
+    });
+
+    window.fbAsyncInit = () => {
+      FB.init({ appId: APP_ID, autoLogAppEvents: true, xfbml: true, version: GRAPH_VERSION });
+      logEl.textContent = 'Pronto. Clique em "Conectar com Facebook".';
+      botao.disabled = false;
+    };
+
+    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function aoTerminar(response) {
+      const code = response.authResponse && response.authResponse.code;
+      if (!code) { log('Fluxo cancelado ou sem autorização.'); botao.disabled = false; return; }
+      window.__es.code = code;
+      for (let i = 0; i < 15 && !sessionInfo; i++) await esperar(200);
+      log('Código recebido. Enviando ao receptor local...');
+      try {
+        const r = await fetch(RECEPTOR, {
+          method: 'POST',
+          headers: { 'content-type': 'text/plain' },
+          body: JSON.stringify({ code, session: sessionInfo }),
+        });
+        log('Receptor: ' + (await r.text()));
+      } catch (e) {
+        log('Receptor local não respondeu (' + e.message + '). O código fica em window.__es.code por 30 s.');
+      }
+    }
+
+    botao.addEventListener('click', () => {
+      botao.disabled = true;
+      sessionInfo = null;
+      window.__es = { code: null, session: null };
+      FB.login((response) => { aoTerminar(response); }, {
+        config_id: ES_CONFIG_ID,
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: { setup: {} },
+      });
+    });
+  </script>
+  <script async defer crossorigin="anonymous" src="https://connect.facebook.net/pt_BR/sdk.js"></script>
+</body>
+</html>
